@@ -555,8 +555,7 @@ for internal diagnostics (off by default).
 
 ## Development
 
-Want to contribute? [CONTRIBUTING.md](CONTRIBUTING.md) walks through forking, the local setup, the test rules, commit
-messages and opening a pull request. The short version:
+Want to contribute? See [CONTRIBUTING.md](CONTRIBUTING.md). The commands you'll use most:
 
 ```bash
 git config core.hooksPath .githooks   # once per clone: keeps docs/cli/ in sync on commit
