@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/CerealKiller97/linkwarden-cli/internal/utils"
@@ -13,9 +15,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeLinkwarden serves the three endpoints init uses. Only sessionToken may
-// mint tokens, and only apiToken may call /users/me.
-func fakeLinkwarden(t *testing.T, sessionToken string, apiToken string) *httptest.Server {
+// fakeServer is a fake Linkwarden instance that records sign-outs.
+type fakeServer struct {
+	*httptest.Server
+
+	mu        sync.Mutex
+	signedOut []string
+}
+
+// SignedOut returns the Bearer tokens DELETE /api/v1/session was called with.
+func (f *fakeServer) SignedOut() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return slices.Clone(f.signedOut)
+}
+
+// fakeLinkwarden serves the endpoints init uses. Signing in as alice/hunter2
+// returns sessionToken. Both sessionToken and apiToken may call /users/me, as
+// Linkwarden accepts sessions and access tokens alike. Init must never mint an
+// access token: the session it signs in with is what it saves.
+func fakeLinkwarden(t *testing.T, sessionToken string, apiToken string) *fakeServer {
 	t.Helper()
 
 	respond := func(w http.ResponseWriter, status int, body any) {
@@ -23,6 +43,8 @@ func fakeLinkwarden(t *testing.T, sessionToken string, apiToken string) *httptes
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(body)
 	}
+
+	fake := &fakeServer{}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/session", func(w http.ResponseWriter, r *http.Request) {
@@ -34,41 +56,45 @@ func fakeLinkwarden(t *testing.T, sessionToken string, apiToken string) *httptes
 		}
 		respond(w, http.StatusOK, map[string]any{"response": map[string]string{"token": sessionToken}})
 	})
+	mux.HandleFunc("DELETE /api/v1/session", func(w http.ResponseWriter, r *http.Request) {
+		fake.mu.Lock()
+		fake.signedOut = append(fake.signedOut, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		fake.mu.Unlock()
+		respond(w, http.StatusOK, map[string]string{"response": "Session revoked."})
+	})
 	mux.HandleFunc("POST /api/v1/tokens", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+sessionToken {
-			respond(w, http.StatusUnauthorized, map[string]string{"response": "nope"})
-			return
-		}
-		respond(w, http.StatusOK, map[string]any{"response": map[string]any{"secretKey": apiToken}})
+		t.Errorf("init minted an access token; it should save the session it signed in with")
+		respond(w, http.StatusInternalServerError, map[string]string{"response": "unexpected"})
 	})
 	mux.HandleFunc("GET /api/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+apiToken {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer "+sessionToken && auth != "Bearer "+apiToken {
 			respond(w, http.StatusUnauthorized, map[string]string{"response": "nope"})
 			return
 		}
 		respond(w, http.StatusOK, map[string]any{"response": map[string]any{"id": 1, "username": "alice"}})
 	})
 
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
+	fake.Server = httptest.NewServer(mux)
+	t.Cleanup(fake.Close)
 
-	return srv
+	return fake
 }
 
-func TestLoginForTokenMintsAccessTokenFromSession(t *testing.T) {
+func TestSignInReturnsSessionToken(t *testing.T) {
 	assert := require.New(t)
 	srv := fakeLinkwarden(t, "session-jwt", "api-token")
 
-	token, err := loginForToken(context.Background(), srv.URL, "alice", "hunter2")
+	token, err := signIn(context.Background(), srv.URL, "alice", "hunter2")
 	assert.NoError(err)
-	assert.Equal("api-token", token)
+	assert.Equal("session-jwt", token)
 }
 
-func TestLoginForTokenWrongPassword(t *testing.T) {
+func TestSignInWrongPassword(t *testing.T) {
 	assert := require.New(t)
 	srv := fakeLinkwarden(t, "session-jwt", "api-token")
 
-	_, err := loginForToken(context.Background(), srv.URL, "alice", "wrong")
+	_, err := signIn(context.Background(), srv.URL, "alice", "wrong")
 	assert.ErrorContains(err, "sign-in failed")
 }
 

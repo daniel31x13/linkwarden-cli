@@ -72,7 +72,7 @@ func TestRunTokenFlowSavesVerifiedToken(t *testing.T) {
 	assert.Equal(os.FileMode(0o600), info.Mode().Perm(), "the config file holds a secret")
 }
 
-func TestRunPasswordFlowSavesMintedTokenNotPassword(t *testing.T) {
+func TestRunPasswordFlowSavesSessionNotPassword(t *testing.T) {
 	assert := require.New(t)
 	srv := fakeLinkwarden(t, "session-jwt", "api-token")
 	opened := isolateInit(t, nil)
@@ -86,15 +86,83 @@ func TestRunPasswordFlowSavesMintedTokenNotPassword(t *testing.T) {
 
 	assert.NoError(runInit(t))
 
-	assert.Equal(utils.Config{URL: srv.URL, Token: "api-token"}, savedConfig(t))
+	assert.Equal(utils.Config{URL: srv.URL, Token: "session-jwt"}, savedConfig(t),
+		"the session init signed in with is the token it saves")
 	assert.Empty(*opened, "the password flow needs no browser")
+	assert.Empty(srv.SignedOut(), "with no config before, there's nothing to sign out")
 
 	path, err := utils.ConfigFile()
 	assert.NoError(err)
 	data, err := os.ReadFile(path)
 	assert.NoError(err)
 	assert.NotContains(string(data), "hunter2", "the password is never stored")
-	assert.NotContains(string(data), "session-jwt", "neither is the sign-in session")
+}
+
+func TestRunPasswordFlowAgainSignsOutReplacedSession(t *testing.T) {
+	assert := require.New(t)
+	srv := fakeLinkwarden(t, "session-jwt", "api-token")
+	isolateInit(t, nil)
+
+	_, err := utils.SaveConfig(utils.Config{URL: srv.URL, Token: "old-session"})
+	assert.NoError(err)
+
+	prompttest.Use(t,
+		prompttest.Answer{Label: "Overwrite it?", Value: "Yes"},
+		prompttest.Answer{Label: "Linkwarden URL"}, // Enter: keep the saved URL
+		prompttest.Answer{Label: "How would you like to set up your account?", Value: "Email / Password"},
+		prompttest.Answer{Label: "Email or username", Value: "alice"},
+		prompttest.Answer{Label: "Password", Value: "hunter2"},
+	)
+
+	assert.NoError(runInit(t))
+
+	assert.Equal(utils.Config{URL: srv.URL, Token: "session-jwt"}, savedConfig(t))
+	assert.Equal([]string{"old-session"}, srv.SignedOut(),
+		"the replaced session is signed out, so re-running init leaves nothing behind")
+}
+
+func TestRunSameTokenAgainSignsNothingOut(t *testing.T) {
+	assert := require.New(t)
+	srv := fakeLinkwarden(t, "session-jwt", "api-token")
+	isolateInit(t, nil)
+
+	_, err := utils.SaveConfig(utils.Config{URL: srv.URL, Token: "api-token"})
+	assert.NoError(err)
+
+	prompttest.Use(t,
+		prompttest.Answer{Label: "Overwrite it?", Value: "Yes"},
+		prompttest.Answer{Label: "Linkwarden URL"},
+		prompttest.Answer{Label: "How would you like to set up your account?", Value: "Access Token (Recommended)"},
+		prompttest.Answer{Label: "Access token", Value: "api-token"},
+	)
+
+	assert.NoError(runInit(t))
+
+	assert.Equal(utils.Config{URL: srv.URL, Token: "api-token"}, savedConfig(t))
+	assert.Empty(srv.SignedOut(), "the token in use must not be signed out")
+}
+
+func TestRunWrongPasswordKeepsExistingSession(t *testing.T) {
+	assert := require.New(t)
+	srv := fakeLinkwarden(t, "session-jwt", "api-token")
+	isolateInit(t, nil)
+
+	existing := utils.Config{URL: srv.URL, Token: "old-session"}
+	_, err := utils.SaveConfig(existing)
+	assert.NoError(err)
+
+	prompttest.Use(t,
+		prompttest.Answer{Label: "Overwrite it?", Value: "Yes"},
+		prompttest.Answer{Label: "Linkwarden URL"},
+		prompttest.Answer{Label: "How would you like to set up your account?", Value: "Email / Password"},
+		prompttest.Answer{Label: "Email or username", Value: "alice"},
+		prompttest.Answer{Label: "Password", Value: "wrong"},
+	)
+
+	assert.ErrorContains(runInit(t), "sign-in failed")
+
+	assert.Equal(existing, savedConfig(t), "a failed sign-in keeps the saved config")
+	assert.Empty(srv.SignedOut(), "and keeps its session signed in")
 }
 
 func TestRunRejectedTokenSavesNothing(t *testing.T) {

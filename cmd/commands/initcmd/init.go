@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/CerealKiller97/linkwarden-cli/internal/utils"
@@ -22,12 +23,14 @@ import (
 // root command doesn't demand LINKWARDEN_TOKEN before it.
 const SkipAuthAnnotation = "linkwarden/skip-auth"
 
-// cliTokenName names the access token minted for the Email / Password option and
-// the session used to create it.
+// cliTokenName names the session the Email / Password option signs in with, as
+// listed under Settings → Access Tokens, and is the name suggested for a token
+// the user creates there.
 const cliTokenName = "linkwarden-cli"
 
-// noExpiry is the Tokens.Create expiry value for a token that never expires.
-const noExpiry = 4
+// signOutTimeout bounds signing out a replaced session, so an unreachable old
+// instance can't hold up init after the new sign-in has been saved.
+const signOutTimeout = 5 * time.Second
 
 // signInMethod is one entry in the "How would you like to set up your account?" menu.
 type signInMethod struct {
@@ -170,6 +173,8 @@ func run(app *app.App, cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("saving config: %w", err)
 	}
 
+	signOutReplaced(ctx, existing, token)
+
 	fmt.Println()
 	fmt.Printf("%s Signed in as %s. Saved to %s\n",
 		color(doneStyle, "✔"), user.Username, path)
@@ -247,8 +252,8 @@ func tokenSteps(pageURL string, provider string, colorOn bool) []string {
 	return lines
 }
 
-// passwordFlow asks for email/username and password, then exchanges them for a
-// long-lived access token.
+// passwordFlow asks for email/username and password and signs in with them,
+// returning the session token to save.
 func passwordFlow(ctx context.Context, app *app.App, instanceURL string) (string, error) {
 	username, err := utils.Input(app, "Email or username:", required("email or username"))
 	if err != nil {
@@ -260,12 +265,15 @@ func passwordFlow(ctx context.Context, app *app.App, instanceURL string) (string
 		return "", err
 	}
 
-	return loginForToken(ctx, instanceURL, strings.TrimSpace(username), password)
+	return signIn(ctx, instanceURL, strings.TrimSpace(username), password)
 }
 
-// loginForToken signs in with a username and password, then uses that session to
-// mint a non-expiring access token for the CLI, so the password is never stored.
-func loginForToken(ctx context.Context, instanceURL string, username string, password string) (string, error) {
+// signIn signs in with a username and password and returns the session token,
+// which the CLI saves and sends as its Bearer token, so the password is never
+// stored. Linkwarden lists the session as cliTokenName under Settings → Access
+// Tokens, where it can be revoked, the same way the mobile app and browser
+// extension sign in.
+func signIn(ctx context.Context, instanceURL string, username string, password string) (string, error) {
 	session, err := newClient(instanceURL, "").Session.Create(ctx, linkwarden.CreateSessionRequest{
 		Username:    username,
 		Password:    password,
@@ -280,12 +288,23 @@ func loginForToken(ctx context.Context, instanceURL string, username string, pas
 		return "", fmt.Errorf("sign-in failed: %w", err)
 	}
 
-	created, err := newClient(instanceURL, session).Tokens.Create(ctx, cliTokenName, noExpiry)
-	if err != nil {
-		return "", fmt.Errorf("creating an access token for the CLI: %w", err)
+	return session, nil
+}
+
+// signOutReplaced signs out the session in the config init just replaced, so
+// running init again doesn't leave a session behind on the instance for every
+// sign-in. It's best effort: Linkwarden only revokes sessions this way, so an
+// access token the user pasted earlier stays valid, and an unreachable instance
+// or an already revoked session changes nothing.
+func signOutReplaced(ctx context.Context, old utils.Config, newToken string) {
+	if old.Token == "" || old.Token == newToken {
+		return
 	}
 
-	return created.SecretKey, nil
+	ctx, cancel := context.WithTimeout(ctx, signOutTimeout)
+	defer cancel()
+
+	_ = newClient(utils.NormalizeInstanceURL(old.URL), old.Token).Session.Delete(ctx)
 }
 
 // verify checks token against the instance and returns the signed-in user.

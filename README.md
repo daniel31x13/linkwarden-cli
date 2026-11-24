@@ -116,11 +116,11 @@ linkwarden init
 | Method | What happens |
 | --- | --- |
 | **Access token** (recommended) | Opens **Settings → Access Tokens** in your browser and asks you to paste the new token. |
-| **Email / password** | Signs in once and creates a `linkwarden-cli` access token. Your password is never stored. |
+| **Email / password** | Signs in and saves that session, listed as `linkwarden-cli` under **Settings → Access Tokens**. Your password is never stored. |
 | **Google, Apple, …** | Listed for each single sign-on provider your instance enables. You sign in in the browser, then paste a token. |
 
 The token is checked against your instance, then saved to `$XDG_CONFIG_HOME/linkwarden/config.json`, readable only
-by you. Run `init` again any time to switch accounts or instances.
+by you. Run `init` again any time to switch accounts or instances; it signs out the session it replaces.
 
 ### 2. Save your first link
 
