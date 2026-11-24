@@ -27,7 +27,7 @@ FROM gcr.io/distroless/static-debian13:nonroot AS prepare-production
 LABEL org.opencontainers.image.source="https://github.com/CerealKiller97/linkwarden-cli"
 LABEL org.opencontainers.image.title="linkwarden-cli"
 LABEL org.opencontainers.image.description="CLI for the Linkwarden bookmark manager"
-LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 ENTRYPOINT ["/usr/local/bin/linkwarden"]
 

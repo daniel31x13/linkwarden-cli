@@ -153,7 +153,7 @@ aurs:
     ids: [linkwarden]
     description: CLI for the Linkwarden bookmark manager
     homepage: https://github.com/CerealKiller97/linkwarden-cli
-    license: AGPL-3.0-only
+    license: Apache-2.0
     maintainers:
       - Stefan Bogdanović <stefan@stefanbogdanovic.dev>
     provides: [linkwarden-cli]
