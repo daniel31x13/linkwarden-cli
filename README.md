@@ -555,6 +555,9 @@ for internal diagnostics (off by default).
 
 ## Development
 
+Want to contribute? [CONTRIBUTING.md](CONTRIBUTING.md) walks through forking, the local setup, the test rules, commit
+messages and opening a pull request. The short version:
+
 ```bash
 git config core.hooksPath .githooks   # once per clone: keeps docs/cli/ in sync on commit
 scripts/dev-linkwarden.sh up          # a throwaway Linkwarden in Docker to test against
@@ -620,6 +623,6 @@ The workflow uses these repository secrets:
 Built with [Cobra](https://github.com/spf13/cobra) · [Bubble Tea](https://github.com/charmbracelet/bubbletea) · [Bubbles](https://github.com/charmbracelet/bubbles) · [Lip Gloss](https://github.com/charmbracelet/lipgloss) · Demos recorded with [VHS](https://github.com/charmbracelet/vhs)
 
 The official CLI for Linkwarden.<br>
-Found a bug or missing a feature? [Open an issue](https://github.com/CerealKiller97/linkwarden-cli/issues/new).
+Found a bug or missing a feature? [Open an issue](https://github.com/CerealKiller97/linkwarden-cli/issues/new), or [send a pull request](CONTRIBUTING.md).
 
 </div>
