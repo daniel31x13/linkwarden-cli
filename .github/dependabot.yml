@@ -1,0 +1,48 @@
+# Dependabot opens pull requests to keep dependencies up to date.
+# Updates are grouped so each ecosystem gives at most a couple of PRs a week.
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+version: 2
+
+updates:
+  # Go modules: Charm (Bubble Tea, Bubbles, Lip Gloss), cobra, zerolog, the SDK, …
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      charm:
+        patterns:
+          - "charm.land/*"
+          - "github.com/charmbracelet/*"
+      go-dependencies:
+        update-types: [minor, patch]
+
+  # Actions used in .github/workflows/
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Base images in the Dockerfile (golang, distroless)
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      docker-images:
+        patterns: ["*"]
