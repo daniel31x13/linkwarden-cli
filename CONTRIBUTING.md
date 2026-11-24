@@ -1,6 +1,7 @@
 # Contributing
 
-Thanks for helping out! Changes come in through a fork and a pull request.
+Thanks for helping out! Changes come in through a fork and a pull request. Everyone taking part follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## 1. Start with an issue
 
