@@ -295,3 +295,76 @@ func TestImportStopsWhenInterrupted(t *testing.T) {
 	assert.NotErrorIs(err, errLinksFailed, "cancelled links aren't failures")
 	assert.LessOrEqual(creates.Load(), int64(defaultConcurrency), "no new requests after Ctrl+C")
 }
+
+func TestImportStopsPagingWhenServerRepeatsAPage(t *testing.T) {
+	assert := require.New(t)
+
+	// Arrange
+	// A server that ignores the cursor and sends the same page every time.
+	var creates, lists atomic.Int64
+	var cursors []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections":
+			_, _ = w.Write([]byte(`{"response":[{"id":1,"name":"Go"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/search":
+			lists.Add(1)
+			cursors = append(cursors, r.URL.Query().Get("cursor"))
+			_, _ = w.Write([]byte(`{"message":"Success","data":{"links":[{"id":2,"url":"https://a.example"},{"id":1,"url":"https://b.example"}]}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/links":
+			creates.Add(1)
+			_, _ = w.Write([]byte(`{"response":{"id":100,"url":"x"}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	utils.SetVars("test-token", server.URL)
+
+	file := writeLinksFile(t, "https://a.example", "https://b.example", "https://new.example")
+	cmd := Import(nil)
+	cmd.SetArgs([]string{"--file", file, "--collection-id", "1"})
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	assert.NoError(err)
+	assert.Equal(int64(2), lists.Load(), "stops once the repeated page's last ID equals the cursor")
+	assert.Equal([]string{"", "1"}, cursors, "first page has no cursor, then the last ID seen")
+	assert.Equal(int64(1), creates.Load(), "links from the repeated page still count as existing")
+}
+
+func TestImportFailsWhenListingExistingLinksFails(t *testing.T) {
+	assert := require.New(t)
+
+	// Arrange
+	var creates atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/collections":
+			_, _ = w.Write([]byte(`{"response":[{"id":1,"name":"Go"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/search":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"response":"boom"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/links":
+			creates.Add(1)
+			_, _ = w.Write([]byte(`{"response":{"id":100,"url":"x"}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	utils.SetVars("test-token", server.URL)
+
+	file := writeLinksFile(t, "https://new.example")
+	cmd := Import(nil)
+	cmd.SetArgs([]string{"--file", file, "--collection-id", "1"})
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	assert.ErrorContains(err, "list links already in the collection")
+	assert.Zero(creates.Load(), "nothing is created when the duplicate check can't run")
+}
